@@ -1,0 +1,21 @@
+package player;
+import battlecode.common.*;
+
+public class State {
+
+	private Robotcontroller rc;
+
+	static Direction[] directions = {Direction.NORTH, Direction.EAST,
+			Direction.SOUTH, Direction.WEST};
+    static RobotType[] spawnedByMiner = {RobotType.REFINERY,
+			RobotType.VAPORATOR, RobotType.DESIGN_SCHOOL,
+            RobotType.FULFILLMENT_CENTER, RobotType.NET_GUN};
+
+	public static void State(RobotController rc) {
+		this.rc = rc;
+	}
+
+	public static Direction[] getDirections() {
+		return directions;
+	}
+}
