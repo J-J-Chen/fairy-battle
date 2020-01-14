@@ -10,6 +10,7 @@ public strictfp class RobotPlayer {
             RobotType.FULFILLMENT_CENTER, RobotType.NET_GUN};
 
     static int turnCount = 0;
+	static int initialRoundNum = 0;
 
 	static int[][] messages = {{-1}, {-1}};
 
@@ -18,6 +19,15 @@ public strictfp class RobotPlayer {
 	static int[] landscaperPath = {-1};
 
 	static int[] locHQ = {-1, -1};  // 0 -> x value, 1 -> y value
+
+	static int[] locSpawn = {-1, -1};
+
+	static boolean isBottom = false;
+	static boolean isTop = false;
+	static boolean isMidY = false;
+	static boolean isRight = false;
+	static boolean isLeft = false;
+	static boolean isMidX = false;
 
     /**
      * run() is the method that is called when a robot is instantiated in the Battlecode world.
@@ -31,6 +41,19 @@ public strictfp class RobotPlayer {
         RobotPlayer.rc = rc;
 
         turnCount = 0;
+		initialRoundNum = rc.getRoundNum();
+
+		locSpawn = new int[2];
+		locSpawn[0] = rc.getLocation().x;
+		locSpawn[1] = rc.getLocation().y;
+
+		if(rc.getLocation().x > (int)(2*rc.getMapWidth()/3)) isRight = true;
+		else if(rc.getLocation().x > (int)(rc.getMapWidth()/3)) isMidX = true;
+		else isLeft = true;
+
+		if(rc.getLocation().y > (int)(2*rc.getMapWidth()/3)) isTop = true;
+		if(rc.getLocation().y > (int)(rc.getMapWidth()/3)) isMidY = true;
+		else isBottom = true;
 
         System.out.println("I'm a " + rc.getType() + " and I just got created!");
         while (true) {
@@ -68,7 +91,8 @@ public strictfp class RobotPlayer {
 			locHQ[0] = rc.getLocation().x;
 			locHQ[1] = rc.getLocation().y;
 		}
-		if(rc.getTeamSoup() >= Constants.MIN_SOUP_TO_PRODUCE_MINER) {
+		// TODO: Create func for Min soup
+		if(rc.getTeamSoup() >= (Constants.BASE_MIN_SOUP_TO_PRODUCE_MINER)) {
         	for (Direction dir : directions)
             	tryBuild(RobotType.MINER, dir);
 		}
@@ -80,6 +104,7 @@ public strictfp class RobotPlayer {
         // tryBuild(randomSpawnedByMiner(), randomDirection());
     	//for (Direction dir : directions)
             //tryBuild(RobotType.FULFILLMENT_CENTER, dir);
+		bugMove(20,4);
         for (Direction dir : directions)
             if (tryRefine(dir))
                 System.out.println("I refined soup! " + rc.getTeamSoup());
@@ -99,7 +124,7 @@ public strictfp class RobotPlayer {
     }
 
     static void runDesignSchool() throws GameActionException {
-
+		//if(makeLandscapers) trybuild();
     }
 
     static void runFulfillmentCenter() throws GameActionException {
@@ -235,12 +260,20 @@ public strictfp class RobotPlayer {
 	}
 
 	/**
-	  The Miner will explore the terrain until it finds another robot
+	  The Miner will explore the terrain until it finds another robot or recieves message to stop exploring
 	  or number of turns elapses
 	  */
-	static RobotType explore(int numTurns) throws GameActionException {
+	//TODO: Create advanced explore that looks for friendly robots and ID's and then updates path accordingly
+	//TODO: Implement message interrupts
+	static RobotType explore(int numTurns, boolean mine) throws GameActionException {
+		boolean isMiner = (rc.getType() == RobotType.MINER);
+		double xFrac = Math.min(Math.abs(locSpawn[0] - rc.getMapWidth()), Math.abs(locSpawn[0]));
+		double yFrac = Math.min(Math.abs(locSpawn[0] - rc.getMapHeight()), Math.abs(locSpawn[0]));
+
+		//TODO: Create fancy func to determine init direction
 		Direction direction = randomDirection();
 		for(int numTurnsElapsed = 0; numTurnsElapsed < numTurns; ++numTurnsElapsed) {
+			if(senseEnemyRobots() != null) break;
 			while(!rc.canMove(direction)) {
 				// Will spin if robot stuck. This is (probably) okay behavior, should move when possible
 				// Also is kind of inefficient. Oh well.
@@ -249,14 +282,58 @@ public strictfp class RobotPlayer {
 			System.out.printf("ROBOT: %d moved %s", rc.getID(), direction.toString());
 			tryMove(direction);
 		}
+
 		return null;
 	}
 
 	/**
-	  Plans a route for the robot based on visibility and objectives
+	  Implements bug move When stucks, chooses a direction and moves in that direction,
+	  will continue to move in that direction if it cannot move towards goal
 	  */
-	static Direction[] findPath() {
-		return null;
+	static boolean bugMove(int x, int y) throws GameActionException{
+		System.out.println("HELLOOOOOO");
+		int spinCounter = 0;
+		Direction direction = directionToLoc(x, y);
+		while((rc.getLocation().x != x) && (rc.getLocation().y != y)) {
+			while(!rc.canMove(direction)) {
+				++spinCounter;
+				if(spinCounter >= 10000) System.out.println("Spun out, returned false");
+				direction = randomDirection(direction); // Does this work better or checking both R and L?
+			}
+			if(tryMove(direction))
+				direction = directionToLoc(x, y);
+			direction = rc.canMove(directionToLoc(x,y)) ? directionToLoc(x,y) : direction;
+			spinCounter = 0;
+		}
+		return true;
+	}
+
+	/**
+	  Finds the direction closest to the given location from current location
+	  */
+	static Direction directionToLoc(int x, int y) {
+		int xDiff = rc.getLocation().x - x;
+		int yDiff = rc.getLocation().y - y;
+
+		boolean mainAxis = ((Math.abs(xDiff) * (Math.pow(3,0.5) / 2)) > Math.abs(yDiff)) ? false : true;
+
+		if(!mainAxis) {
+			if(xDiff <= 0) {
+				if(yDiff <= 0) return Direction.NORTHEAST;
+				else return Direction.SOUTHEAST;
+			} else {
+				if(yDiff < 0) return Direction.NORTHWEST;
+				else return Direction.SOUTHWEST;
+			}
+		} else {
+			if((double)(Math.abs(xDiff)/(Math.abs(yDiff) == 0 ? 0.01 : Math.abs(yDiff))) >= 4.0) {
+				if(xDiff < 0) return Direction.EAST;
+				else return Direction.WEST;
+			} else {
+				if(yDiff < 0) return Direction.NORTH;
+				else return Direction.SOUTH;
+			}
+		}
 	}
 
 	/**
@@ -264,6 +341,7 @@ public strictfp class RobotPlayer {
 	  */
 	static Direction randomDirection(Direction dir) {
 		boolean first = (Math.random() >= 0.5) ? true : false;
+		//boolean first = false;
 		switch(dir) {
 			case NORTH: return (first ? Direction.NORTHWEST : Direction.NORTHEAST);
 			case NORTHEAST: return (first ? Direction.NORTH : Direction.EAST);
@@ -284,7 +362,8 @@ public strictfp class RobotPlayer {
 	}
 
 	static RobotInfo[] senseEnemyRobots() {
-		return rc.senseNearbyRobots(rc.getCurrentSensorRadiusSquared(), (rc.getTeam() == Team.A ? Team.B : Team.A));
+		return rc.senseNearbyRobots(rc.getCurrentSensorRadiusSquared(),
+				(rc.getTeam() == Team.A ? Team.B : Team.A));
 	}
 
 	static RobotInfo[] senseFriendlyRobots() {
