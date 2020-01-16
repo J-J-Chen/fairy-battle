@@ -19,6 +19,7 @@ public strictfp class RobotPlayer {
 	static int[] landscaperPath = {-1};
 
 	static int[] locHQ = {-1, -1};  // 0 -> x value, 1 -> y value
+	static int[] locHQGuess = {-1, -1};
 
 	static int[] locSpawn = {-1, -1};
 
@@ -36,8 +37,6 @@ public strictfp class RobotPlayer {
     @SuppressWarnings("unused")
     public static void run(RobotController rc) throws GameActionException {
 
-        // This is the RobotController object. You use it to perform actions from this robot,
-        // and to get information on its current status.
         RobotPlayer.rc = rc;
 
         turnCount = 0;
@@ -86,15 +85,27 @@ public strictfp class RobotPlayer {
     }
 
     static void runHQ() throws GameActionException {
-		if(locHQ[0] < 0) {
-			locHQ = new int[2];
-			locHQ[0] = rc.getLocation().x;
-			locHQ[1] = rc.getLocation().y;
-		}
 		// TODO: Create func for Min soup
+		/**if(rc.getRoundNum() < 3) {
+			if(rc.getMapHeight() != rc.getMapWidth()) {
+				if(rc.getMapHeight() > rc.getMapWidth()) {
+					locHQGuess[0] = rc.getLocation().x;
+					locHQGuess[1] = rc.getMapHeight() - rc.getLocation().y;
+				} else {
+					locHQGuess[0] = rc.getMapWidth() - rc.getLocation().x;
+					locHQGuess[1] = rc.getLocation().y;
+				}
+			} else {
+				locHQGuess[0] = rc.getMapWidth() - rc.getLocation().x;
+				locHQGuess[0] = rc.getMapWidth() - rc.getLocation().y;
+			}
+		}*/
 		if(rc.getTeamSoup() >= (Constants.BASE_MIN_SOUP_TO_PRODUCE_MINER)) {
-        	for (Direction dir : directions)
-            	tryBuild(RobotType.MINER, dir);
+			if(tryBuild(RobotType.MINER, directionToLoc(locHQGuess[0], locHQGuess[1]))) {
+			} else {
+					for (Direction dir : directions)
+            			if(tryBuild(RobotType.MINER, dir)) break;
+				}
 		}
 		// If build miner, send message of HQ loc and path to take.
     }
@@ -104,7 +115,26 @@ public strictfp class RobotPlayer {
         // tryBuild(randomSpawnedByMiner(), randomDirection());
     	//for (Direction dir : directions)
             //tryBuild(RobotType.FULFILLMENT_CENTER, dir);
-		bugMove(20,4);
+		bugMove(50,5);
+		/**while(rc.getRoundNum() < 3) {
+			if(rc.getMapHeight() != rc.getMapWidth()) {
+				if(rc.getMapHeight() > rc.getMapWidth()) {
+					locHQGuess[0] = rc.getLocation().x;
+					locHQGuess[1] = rc.getMapHeight() - rc.getLocation().y;
+				} else {
+					locHQGuess[0] = rc.getMapWidth() - rc.getLocation().x;
+					locHQGuess[1] = rc.getLocation().y;
+				}
+			} else {
+				locHQGuess[0] = rc.getMapWidth() - rc.getLocation().x;
+				locHQGuess[0] = rc.getMapWidth() - rc.getLocation().y;
+			}
+			//Clock.yield();
+		}
+		System.out.printf("MADE IT, %d, %d", locHQGuess[0], locHQGuess[1]);
+		bugMove(locHQGuess[0], locHQGuess[1]);
+		//bugMove(37, 37);
+		//TODO: MAKE SURE TO NOT REFINE OPPONENT'S
         for (Direction dir : directions)
             if (tryRefine(dir))
                 System.out.println("I refined soup! " + rc.getTeamSoup());
@@ -113,6 +143,7 @@ public strictfp class RobotPlayer {
                 System.out.println("I mined soup! " + rc.getSoupCarrying());
         if (tryMove(randomDirection()))
             System.out.println("I moved!");
+			*/
     }
 
     static void runRefinery() throws GameActionException {
@@ -291,19 +322,24 @@ public strictfp class RobotPlayer {
 	  will continue to move in that direction if it cannot move towards goal
 	  */
 	static boolean bugMove(int x, int y) throws GameActionException{
-		System.out.println("HELLOOOOOO");
+		System.out.printf("HELLOOOOOO, %d, %d", x, y);
 		int spinCounter = 0;
+		int turnCount = 0;
 		Direction direction = directionToLoc(x, y);
-		while((rc.getLocation().x != x) && (rc.getLocation().y != y)) {
+		while((rc.getLocation().x != x) || (rc.getLocation().y != y)) {
+			System.out.printf("BUG MOVE turn %d\n", turnCount);
+			direction = rc.canMove(directionToLoc(x,y)) ? directionToLoc(x,y) : direction;
+			System.out.printf("Trying to move in direction %s\n", direction.toString());
+			//if(turnCount >= 200) System.out.println("Unable to reach");
 			while(!rc.canMove(direction)) {
 				++spinCounter;
 				if(spinCounter >= 10000) System.out.println("Spun out, returned false");
 				direction = randomDirection(direction); // Does this work better or checking both R and L?
 			}
 			if(tryMove(direction))
-				direction = directionToLoc(x, y);
-			direction = rc.canMove(directionToLoc(x,y)) ? directionToLoc(x,y) : direction;
+				Clock.yield();
 			spinCounter = 0;
+			//++turnCount;
 		}
 		return true;
 	}
@@ -312,7 +348,8 @@ public strictfp class RobotPlayer {
 	  Finds the direction closest to the given location from current location
 	  */
 	static Direction directionToLoc(int x, int y) {
-		int xDiff = rc.getLocation().x - x;
+		return rc.getLocation().directionTo(new MapLocation(x,y));
+		/**int xDiff = rc.getLocation().x - x;
 		int yDiff = rc.getLocation().y - y;
 
 		boolean mainAxis = ((Math.abs(xDiff) * (Math.pow(3,0.5) / 2)) > Math.abs(yDiff)) ? false : true;
@@ -333,7 +370,7 @@ public strictfp class RobotPlayer {
 				if(yDiff < 0) return Direction.NORTH;
 				else return Direction.SOUTH;
 			}
-		}
+		}*/
 	}
 
 	/**
@@ -353,6 +390,20 @@ public strictfp class RobotPlayer {
 			case NORTHWEST: return (first ? Direction.WEST : Direction.NORTH);
 			default: return Direction.NORTH;
 		}
+	}
+
+	/**
+	  Returns an array of squares visible to the robot
+	  */
+	static MapLocation[] getVisibleLocs() {
+		int visionRadius = rc.getCurrentSensorRadiusSquared();
+		int radius = (int) Math.pow(visionRadius, 0.5);
+		for(int i = 0; i < radius; ++i) {
+			for(int j = 0; j < radius; ++j) {
+			}
+		}
+
+		return null;
 	}
 
 	static void readMessages() {
