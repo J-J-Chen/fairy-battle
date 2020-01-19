@@ -1,6 +1,7 @@
 package player;
 import battlecode.common.*;
 import java.lang.Math;
+import java.util.ArrayList;
 
 public strictfp class RobotPlayer {
     static RobotController rc;
@@ -18,10 +19,9 @@ public strictfp class RobotPlayer {
 
 	static int[] landscaperPath = {-1};
 
-	static int[] locHQ = {-1, -1};  // 0 -> x value, 1 -> y value
-	static int[] locHQGuess = {-1, -1};
-
-	static int[] locSpawn = {-1, -1};
+	static MapLocation locHQ = null;
+	static MapLocation locHQGuess = null;
+	static MapLocation locSpawn = null;
 
 	static boolean isBottom = false;
 	static boolean isTop = false;
@@ -42,9 +42,18 @@ public strictfp class RobotPlayer {
         turnCount = 0;
 		initialRoundNum = rc.getRoundNum();
 
-		locSpawn = new int[2];
-		locSpawn[0] = rc.getLocation().x;
-		locSpawn[1] = rc.getLocation().y;
+		locSpawn = rc.getLocation();
+
+		if(rc.getType() == RobotType.MINER) {
+			RobotInfo[] robots = senseFriendlyRobots();
+			for(RobotInfo robot : robots) {
+				if(robot.type == RobotType.HQ) {
+					locHQ = robot.location;
+					System.out.println("GOT HQ LOC");
+					break;
+				}
+			}
+		}
 
 		if(rc.getLocation().x > (int)(2*rc.getMapWidth()/3)) isRight = true;
 		else if(rc.getLocation().x > (int)(rc.getMapWidth()/3)) isMidX = true;
@@ -101,7 +110,7 @@ public strictfp class RobotPlayer {
 			}
 		}*/
 		if(rc.getTeamSoup() >= (Constants.BASE_MIN_SOUP_TO_PRODUCE_MINER)) {
-			if(tryBuild(RobotType.MINER, directionToLoc(locHQGuess[0], locHQGuess[1]))) {
+			if(tryBuild(RobotType.MINER, rc.getLocation().directionTo(locHQGuess))) {
 			} else {
 					for (Direction dir : directions)
             			if(tryBuild(RobotType.MINER, dir)) break;
@@ -115,7 +124,8 @@ public strictfp class RobotPlayer {
         // tryBuild(randomSpawnedByMiner(), randomDirection());
     	//for (Direction dir : directions)
             //tryBuild(RobotType.FULFILLMENT_CENTER, dir);
-		bugMove(50,5);
+		//bugMove(new MapLocation(50, 5), true);
+		minerMine();
 		/**while(rc.getRoundNum() < 3) {
 			if(rc.getMapHeight() != rc.getMapWidth()) {
 				if(rc.getMapHeight() > rc.getMapWidth()) {
@@ -291,6 +301,75 @@ public strictfp class RobotPlayer {
 	}
 
 	/**
+	  Miner will take an adventure and explore and gather soup
+	  */
+	static void minerMine() throws GameActionException {
+		//TODO: HQ sense soup, send init direction closest
+		while(!rc.isReady()) Clock.yield();
+		MapLocation[] soupLocs = rc.senseNearbySoup();
+		if(soupLocs.length != 0) {
+			MapLocation closestLoc = shortestLocation(soupLocs);
+			bugMove(shortestLocation(soupLocs), true);
+			while(true) {
+				while(!rc.isReady()) Clock.yield();
+				if(rc.getSoupCarrying() >= 99) {
+					minerRefine();
+					return;
+				}
+				while(!rc.isReady()) Clock.yield();
+				if(rc.senseSoup(closestLoc) == 0 ) return;
+				if(!tryMine(rc.getLocation().directionTo(closestLoc)))
+					System.out.println("BUG DONE GOOFED");
+			}
+		} else {
+			//Continue finding soup
+			while(!rc.isReady()) Clock.yield();
+			while(true) {
+				if(tryMove(randomDirection())) break;
+			}
+		}
+	}
+
+	/**
+	  Miner will find the closest refinery or HQ if there are no refineries in vision
+	  */
+	static void minerRefine() throws GameActionException {
+		RobotInfo[] friendlyRobots = senseFriendlyRobots();
+		ArrayList<MapLocation> refineries = new ArrayList<MapLocation>();
+		for(RobotInfo robot : friendlyRobots) {
+			if(robot.type == RobotType.REFINERY) refineries.add(robot.location);
+		}
+		if(refineries.isEmpty()) {
+			bugMove(locHQ, true);
+			while(!rc.isReady()) Clock.yield();
+			tryRefine(rc.getLocation().directionTo(locHQ));
+		} else {
+			MapLocation closestRefinery = shortestLocation(refineries.toArray(new MapLocation[0]));
+			bugMove(closestRefinery, true);
+			while(!rc.isReady()) Clock.yield();
+			tryRefine(rc.getLocation().directionTo(closestRefinery));
+		}
+	}
+
+	/**
+	  Finds the location closest to the current location given an array of locs
+	  Need to implement a better path finding alg for better results
+	  */
+	static MapLocation shortestLocation(MapLocation[] locs) {
+		int shortestPath = 10000;
+		MapLocation shortestLoc = locs[0];
+		for(MapLocation loc : locs) {
+			//TODO: Find taxi cab shortest path
+			int length = Math.abs(rc.getLocation().x - loc.x) + Math.abs(rc.getLocation().y - loc.y);
+			if(length < shortestPath) {
+				shortestPath = length;
+				shortestLoc = loc;
+			}
+		}
+		return shortestLoc;
+	}
+
+	/**
 	  The Miner will explore the terrain until it finds another robot or recieves message to stop exploring
 	  or number of turns elapses
 	  */
@@ -298,13 +377,14 @@ public strictfp class RobotPlayer {
 	//TODO: Implement message interrupts
 	static RobotType explore(int numTurns, boolean mine) throws GameActionException {
 		boolean isMiner = (rc.getType() == RobotType.MINER);
-		double xFrac = Math.min(Math.abs(locSpawn[0] - rc.getMapWidth()), Math.abs(locSpawn[0]));
-		double yFrac = Math.min(Math.abs(locSpawn[0] - rc.getMapHeight()), Math.abs(locSpawn[0]));
+		double xFrac = Math.min(Math.abs(locSpawn.x - rc.getMapWidth()), Math.abs(locSpawn.x));
+		double yFrac = Math.min(Math.abs(locSpawn.y - rc.getMapHeight()), Math.abs(locSpawn.y));
 
 		//TODO: Create fancy func to determine init direction
 		Direction direction = randomDirection();
 		for(int numTurnsElapsed = 0; numTurnsElapsed < numTurns; ++numTurnsElapsed) {
 			if(senseEnemyRobots() != null) break;
+			while(!rc.isReady()) Clock.yield();
 			while(!rc.canMove(direction)) {
 				// Will spin if robot stuck. This is (probably) okay behavior, should move when possible
 				// Also is kind of inefficient. Oh well.
@@ -320,28 +400,42 @@ public strictfp class RobotPlayer {
 	/**
 	  Implements bug move When stucks, chooses a direction and moves in that direction,
 	  will continue to move in that direction if it cannot move towards goal
+	  @param closeEnough True if can finish at adjacent tile, false for perfect location
 	  */
-	static boolean bugMove(int x, int y) throws GameActionException{
-		System.out.printf("HELLOOOOOO, %d, %d", x, y);
-		int spinCounter = 0;
-		int turnCount = 0;
+	static boolean bugMove(MapLocation location, boolean closeEnough) throws GameActionException {
+		int x = location.x;
+		int y = location.y;
+		while(!rc.isReady()) Clock.yield();
 		Direction direction = directionToLoc(x, y);
+
 		while((rc.getLocation().x != x) || (rc.getLocation().y != y)) {
-			System.out.printf("BUG MOVE turn %d\n", turnCount);
-			direction = rc.canMove(directionToLoc(x,y)) ? directionToLoc(x,y) : direction;
+			while(!rc.isReady()) Clock.yield();
+
+			direction = canPhysicallyMove(directionToLoc(x,y)) ? directionToLoc(x,y) : direction;
+			if(closeEnough && rc.getLocation().isAdjacentTo(new MapLocation(x, y)) &&
+					!canPhysicallyMove(directionToLoc(x,y))) return true;
+
 			System.out.printf("Trying to move in direction %s\n", direction.toString());
-			//if(turnCount >= 200) System.out.println("Unable to reach");
-			while(!rc.canMove(direction)) {
-				++spinCounter;
-				if(spinCounter >= 10000) System.out.println("Spun out, returned false");
-				direction = randomDirection(direction); // Does this work better or checking both R and L?
-			}
+
+			// If can't move in direction or if it is flooded, choose a different direction
+			while(!canPhysicallyMove(direction) || rc.senseFlooding(rc.getLocation().add(direction)))
+				direction = randomDirection(direction);
 			if(tryMove(direction))
 				Clock.yield();
-			spinCounter = 0;
-			//++turnCount;
 		}
 		return true;
+	}
+
+	/**
+	  Same as canMove except it doesn't check to see if the robot is ready()
+	  */
+	static boolean canPhysicallyMove(Direction dir) throws GameActionException {
+		MapLocation target  = rc.getLocation().add(dir);
+		boolean isOnMap = rc.onTheMap(target);
+		boolean isOccuppied = rc.senseRobotAtLocation(target) != null;
+		boolean dirtDiff = (Math.abs(rc.senseElevation(rc.getLocation()) - rc.senseElevation(target)) <=
+				GameConstants.MAX_DIRT_DIFFERENCE) ? true : false;
+		return (isOnMap && !isOccuppied && (dirtDiff || rc.getType() == RobotType.DELIVERY_DRONE));
 	}
 
 	/**
@@ -393,17 +487,20 @@ public strictfp class RobotPlayer {
 	}
 
 	/**
-	  Returns an array of squares visible to the robot
+	  Returns an ArrayList of squares visible to the robot
 	  */
 	static MapLocation[] getVisibleLocs() {
 		int visionRadius = rc.getCurrentSensorRadiusSquared();
 		int radius = (int) Math.pow(visionRadius, 0.5);
-		for(int i = 0; i < radius; ++i) {
-			for(int j = 0; j < radius; ++j) {
+		ArrayList<MapLocation> locs = new ArrayList<MapLocation>();
+		for(int i = -radius; i <= radius; ++i) {
+			for(int j = -radius; j <= radius; ++j) {
+				// Is this okay?
+				MapLocation loc = new MapLocation(rc.getLocation().x + j, rc.getLocation().y + i);
+				if(rc.canSenseLocation(loc)) locs.add(loc);
 			}
 		}
-
-		return null;
+		return locs.toArray(new MapLocation[0]);
 	}
 
 	static void readMessages() {
@@ -418,7 +515,13 @@ public strictfp class RobotPlayer {
 	}
 
 	static RobotInfo[] senseFriendlyRobots() {
-		return rc.senseNearbyRobots(rc.getCurrentSensorRadiusSquared(), rc.getTeam());
+		ArrayList<RobotInfo> friendlyRobots = new ArrayList<RobotInfo>();
+		RobotInfo[] allRobots = rc.senseNearbyRobots();
+		System.out.printf("NUMBER OF BOTS %d\n", allRobots.length);
+		for(RobotInfo robot : allRobots) {
+			if(robot.team == rc.getTeam()) friendlyRobots.add(robot);
+		}
+		return friendlyRobots.toArray(new RobotInfo[0]);
 	}
 
 	private enum MSGType {
