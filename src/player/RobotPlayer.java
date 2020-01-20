@@ -12,6 +12,7 @@ public strictfp class RobotPlayer {
 
     static int turnCount = 0;
 	static int initialRoundNum = 0;
+	static int spawnCount = 0;
 
 	static int[][] messages = {{-1}, {-1}};
 
@@ -63,14 +64,12 @@ public strictfp class RobotPlayer {
 		if(rc.getLocation().y > (int)(rc.getMapWidth()/3)) isMidY = true;
 		else isBottom = true;
 
-        System.out.println("I'm a " + rc.getType() + " and I just got created!");
+        //System.out.println("I'm a " + rc.getType() + " and I just got created!");
         while (true) {
             turnCount += 1;
             // Try/catch blocks stop unhandled exceptions, which cause your robot to explode
             try {
-                // Here, we've separated the controls into a different method for each RobotType.
-                // You can add the missing ones or rewrite this into your own control structure.
-                System.out.println("I'm a " + rc.getType() + "! Location " + rc.getLocation());
+                //System.out.println("I'm a " + rc.getType() + "! Location " + rc.getLocation());
                 switch (rc.getType()) {
                     case HQ:                 runHQ();                break;
                     case MINER:              runMiner();             break;
@@ -82,9 +81,6 @@ public strictfp class RobotPlayer {
                     case DELIVERY_DRONE:     runDeliveryDrone();     break;
                     case NET_GUN:            runNetGun();            break;
                 }
-
-                // Clock.yield() makes the robot wait until the next turn, then it will perform this loop again
-                Clock.yield();
 
             } catch (Exception e) {
                 System.out.println(rc.getType() + " Exception");
@@ -109,12 +105,18 @@ public strictfp class RobotPlayer {
 				locHQGuess[0] = rc.getMapWidth() - rc.getLocation().y;
 			}
 		}*/
-		if(rc.getTeamSoup() >= (Constants.BASE_MIN_SOUP_TO_PRODUCE_MINER)) {
-			if(tryBuild(RobotType.MINER, rc.getLocation().directionTo(locHQGuess))) {
-			} else {
-					for (Direction dir : directions)
-            			if(tryBuild(RobotType.MINER, dir)) break;
-				}
+		if((rc.getTeamSoup() >= (Constants.BASE_MIN_SOUP_TO_PRODUCE_MINER)) &&
+			spawnCount <= Constants.INIT_NUM_MINERS_TO_PRODUCE) {
+			while(!rc.isReady()) Clock.yield();
+			//if(tryBuild(RobotType.MINER, rc.getLocation().directionTo(locHQGuess))) {
+			//} else {
+					for (Direction dir : directions) {
+            			if(tryBuild(RobotType.MINER, dir)) {
+							++spawnCount;
+							break;
+						}
+					}
+				//}
 		}
 		// If build miner, send message of HQ loc and path to take.
     }
@@ -125,6 +127,11 @@ public strictfp class RobotPlayer {
     	//for (Direction dir : directions)
             //tryBuild(RobotType.FULFILLMENT_CENTER, dir);
 		//bugMove(new MapLocation(50, 5), true);
+		if(rc.getTeamSoup() >= Constants.BASE_MIN_SOUP_TO_PRODUCE_FC) {
+			for(Direction dir : directions) {
+				if(tryBuild(RobotType.FULFILLMENT_CENTER, dir)) break;
+			}
+		}
 		minerMine();
 		/**while(rc.getRoundNum() < 3) {
 			if(rc.getMapHeight() != rc.getMapWidth()) {
@@ -139,12 +146,7 @@ public strictfp class RobotPlayer {
 				locHQGuess[0] = rc.getMapWidth() - rc.getLocation().x;
 				locHQGuess[0] = rc.getMapWidth() - rc.getLocation().y;
 			}
-			//Clock.yield();
 		}
-		System.out.printf("MADE IT, %d, %d", locHQGuess[0], locHQGuess[1]);
-		bugMove(locHQGuess[0], locHQGuess[1]);
-		//bugMove(37, 37);
-		//TODO: MAKE SURE TO NOT REFINE OPPONENT'S
         for (Direction dir : directions)
             if (tryRefine(dir))
                 System.out.println("I refined soup! " + rc.getTeamSoup());
@@ -187,7 +189,9 @@ public strictfp class RobotPlayer {
                 // Pick up a first robot within range
                 rc.pickUpUnit(robots[0].getID());
                 System.out.println("I picked up " + robots[0].getID() + "!");
-            }
+            } else {
+				tryMove(randomDirection());
+			}
         } else {
             // No close robots, so search for robots within sight radius
             tryMove(randomDirection());
@@ -390,7 +394,7 @@ public strictfp class RobotPlayer {
 				// Also is kind of inefficient. Oh well.
 				direction = randomDirection(direction);
 			}
-			System.out.printf("ROBOT: %d moved %s", rc.getID(), direction.toString());
+			//System.out.printf("ROBOT: %d moved %s", rc.getID(), direction.toString());
 			tryMove(direction);
 		}
 
@@ -517,7 +521,7 @@ public strictfp class RobotPlayer {
 	static RobotInfo[] senseFriendlyRobots() {
 		ArrayList<RobotInfo> friendlyRobots = new ArrayList<RobotInfo>();
 		RobotInfo[] allRobots = rc.senseNearbyRobots();
-		System.out.printf("NUMBER OF BOTS %d\n", allRobots.length);
+		//System.out.printf("NUMBER OF BOTS %d\n", allRobots.length);
 		for(RobotInfo robot : allRobots) {
 			if(robot.team == rc.getTeam()) friendlyRobots.add(robot);
 		}
