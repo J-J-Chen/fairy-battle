@@ -13,6 +13,7 @@ public strictfp class RobotPlayer {
     static int turnCount = 0;
 	static int initialRoundNum = 0;
 	static int spawnCount = 0;
+	static int greatestSoup = 0;
 
 	static int[][] messages = {{-1}, {-1}};
 
@@ -45,6 +46,7 @@ public strictfp class RobotPlayer {
 
 		locSpawn = rc.getLocation();
 
+		// If miner, store loc of HQ
 		if(rc.getType() == RobotType.MINER) {
 			RobotInfo[] robots = senseFriendlyRobots();
 			for(RobotInfo robot : robots) {
@@ -63,6 +65,8 @@ public strictfp class RobotPlayer {
 		if(rc.getLocation().y > (int)(2*rc.getMapWidth()/3)) isTop = true;
 		if(rc.getLocation().y > (int)(rc.getMapWidth()/3)) isMidY = true;
 		else isBottom = true;
+
+		// If HQ, search for nearby soup
 
         //System.out.println("I'm a " + rc.getType() + " and I just got created!");
         while (true) {
@@ -105,6 +109,28 @@ public strictfp class RobotPlayer {
 				locHQGuess[0] = rc.getMapWidth() - rc.getLocation().y;
 			}
 		}*/
+		RobotInfo[] enemies = senseEnemyRobots();
+		for(RobotInfo robot : enemies) {
+			if(robot.type == RobotType.DELIVERY_DRONE) {
+				while(!rc.isReady()) Clock.yield();
+				rc.shootUnit(robot.ID);
+			}
+		}
+
+		while(!rc.isReady()) Clock.yield();
+
+		/**MapLocation[] soupLocsHQ = rc.senseNearbySoup();
+		if(soupLocs.length > 0) {
+			MapLocation mostSoup = null;
+			for(MapLocation loc : soupLocs) {
+				if(rc.getSoup(loc) > greatestSoup - (spawnCount == 0 ? 0 : 100)) {
+					mostSoup = loc;
+					greatestSoup = rc.getSoup(loc);
+					alreadyOcc = false;
+				}
+			}
+		}*/
+
 		if((rc.getTeamSoup() >= (Constants.BASE_MIN_SOUP_TO_PRODUCE_MINER)) &&
 			spawnCount <= Constants.INIT_NUM_MINERS_TO_PRODUCE) {
 			while(!rc.isReady()) Clock.yield();
@@ -126,13 +152,33 @@ public strictfp class RobotPlayer {
         // tryBuild(randomSpawnedByMiner(), randomDirection());
     	//for (Direction dir : directions)
             //tryBuild(RobotType.FULFILLMENT_CENTER, dir);
-		//bugMove(new MapLocation(50, 5), true);
-		if(rc.getTeamSoup() >= Constants.BASE_MIN_SOUP_TO_PRODUCE_FC) {
-			for(Direction dir : directions) {
-				if(tryBuild(RobotType.FULFILLMENT_CENTER, dir)) break;
+		boolean toBuildDesign = false;
+		for(int i = 0; i < GameConstants.INITIAL_COOLDOWN_TURNS; ++i)
+			Clock.yield();
+		while(!rc.isReady()) Clock.yield();
+
+		if(rc.getTeamSoup >= 150) {
+			// Dear God this is horrible
+			bugMove(locHQ.add(locHQ.directionTo(locSpawn)).add(locHQ.directionTo(locSpawn)), false);
+			while(!rc.isReady()) Clock.yield();
+			if(rc.tryBuild(RobotType.DESIGN_SCHOOL, locHQ.directionTo(locSpawn))) {
+				//
+			} else {
+				for(Direction dir : directions) {
+					if(rc.tryBuild(RobotType.DESIGN_SCHOOL, dir)) break;
+				}
 			}
 		}
-		minerMine();
+
+		while(true) {
+			while(!rc.isReady()) Clock.yield();
+			if(rc.getTeamSoup() >= Constants.BASE_MIN_SOUP_TO_PRODUCE_FC) {
+				for(Direction dir : directions) {
+					if(tryBuild(RobotType.FULFILLMENT_CENTER, dir)) break;
+				}
+			}
+			minerMine();
+		}
 		/**while(rc.getRoundNum() < 3) {
 			if(rc.getMapHeight() != rc.getMapWidth()) {
 				if(rc.getMapHeight() > rc.getMapWidth()) {
@@ -168,6 +214,7 @@ public strictfp class RobotPlayer {
 
     static void runDesignSchool() throws GameActionException {
 		//if(makeLandscapers) trybuild();
+		tryBuild(RobotType.LANDSCAPER, rc.getLocation().directionTo(locHQ));
     }
 
     static void runFulfillmentCenter() throws GameActionException {
@@ -182,12 +229,13 @@ public strictfp class RobotPlayer {
     static void runDeliveryDrone() throws GameActionException {
         Team enemy = rc.getTeam().opponent();
         if (!rc.isCurrentlyHoldingUnit()) {
-            // See if there are any enemy robots within striking range (distance 1 from lumberjack's radius)
             RobotInfo[] robots = rc.senseNearbyRobots(GameConstants.DELIVERY_DRONE_PICKUP_RADIUS_SQUARED, enemy);
 
             if (robots.length > 0) {
-                // Pick up a first robot within range
-                rc.pickUpUnit(robots[0].getID());
+				for(RobotInfo enemies : robots) {
+					if(enemies.type != RobotType.DELIVERY_DRONE)
+                		rc.pickUpUnit(robots[0].getID());
+				}
                 System.out.println("I picked up " + robots[0].getID() + "!");
             } else {
 				tryMove(randomDirection());
@@ -199,8 +247,44 @@ public strictfp class RobotPlayer {
     }
 
     static void runNetGun() throws GameActionException {
-
+		RobotInfo[] enemies = senseEnemyRobots();
+		for(RobotInfo robot : enemies) {
+			if(robot.type == RobotType.DELIVERY_DRONE) {
+				while(!rc.isReady()) Clock.yield();
+				rc.shootUnit(robot.ID);
+			}
+		}
     }
+
+	static void minerEndGame() {
+		Direction dirToHQ = locSpawn.directionTo(locHQ);
+		MapLocation toStay = addInvert(locSpawn, dirToHQ, 1);
+
+		//TODO: Make more robust, in case it is impossible to move to
+		bugMove(toStay, false);
+		// Look at other positions, furthest away from center builds first
+	}
+
+	/**
+	  Returns a new location that is in the opposite direction numTimes
+	  */
+	static MapLocation addInvert(MapLocation initLoc, Direction dir, int numTimes) {
+		MapLocation finalLoc = initLoc;
+		for(int i = 0; i < numTimes; ++i) {
+			switch(dir) {
+				case EAST: finalLoc.add(Direction.WEST); break;
+				case WEST: finalLoc.add(Direction.EAST); break;
+				case NORTH: finalLoc.add(Direction.SOUTH); break;
+				case SOUTH: finalLoc.add(Direction.NORTH); break;
+				case NORTHEAST: finalLoc.add(Direction.SOUTHWEST); break;
+				case NORTHWEST: finalLoc.add(Direction.SOUTHEAST); break;
+				case SOUTHEAST: finalLoc.add(Direction.NORTHWEST); break;
+				case SOUTHWEST: finalLoc.add(Direction.NORTHEAST); break;
+				default: break;
+			}
+		}
+		return finalLoc;
+	}
 
     /**
      * Returns a random Direction.
